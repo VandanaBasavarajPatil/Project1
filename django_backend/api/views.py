@@ -481,12 +481,14 @@ class CommentListCreateView(generics.ListCreateAPIView):
 class NotificationListView(generics.ListAPIView):
     """List user notifications"""
     serializer_class = NotificationSerializer
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        return Notification.objects.filter(user=self.request.user)
+        return Notification.objects.filter(user=self.request.user).order_by('-created_at')
 
 
 @api_view(['PATCH'])
+@permission_classes([permissions.IsAuthenticated])
 def mark_notification_read(request, pk):
     """Mark a notification as read"""
     try:
@@ -496,6 +498,43 @@ def mark_notification_read(request, pk):
         return Response({'message': 'Notification marked as read'})
     except Notification.DoesNotExist:
         return Response({'error': 'Notification not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def mark_all_notifications_read(request):
+    """Mark all user notifications as read"""
+    Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+    return Response({'message': 'All notifications marked as read'})
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def notification_summary(request):
+    """Get notification summary for the user"""
+    from .notifications import get_user_notification_summary
+    
+    summary = get_user_notification_summary(request.user)
+    summary['recent_notifications'] = NotificationSerializer(
+        summary['recent_notifications'], many=True
+    ).data
+    
+    return Response(summary)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def check_reminders(request):
+    """Manual trigger for checking due tasks and creating reminders"""
+    from .notifications import check_due_tasks, check_overdue_tasks
+    
+    if request.user.role == 'scrum_master':
+        check_due_tasks()
+        check_overdue_tasks()
+        return Response({'message': 'Reminders checked and notifications created'})
+    else:
+        return Response({'error': 'Only Scrum Masters can trigger reminders'}, 
+                       status=status.HTTP_403_FORBIDDEN)
 
 
 # Analytics Views
