@@ -38,6 +38,9 @@ urlpatterns = [
     path('users/', views.UserListView.as_view(), name='user-list'),
     path('users/<uuid:pk>/', views.UserDetailView.as_view(), name='user-detail'),
     path('users/me/', views.me_view, name='user-profile'),
+    path('users/change-password/', views.change_password, name='change-password'),
+    path('users/update-profile/', views.update_profile, name='update-profile'),
+    path('users/preferences/', views.user_preferences, name='user-preferences'),
     
     # Comment endpoints
     path('tasks/<uuid:task_id>/comments/', views.CommentListCreateView.as_view(), name='comment-list-create'),
