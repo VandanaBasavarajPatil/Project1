@@ -39,9 +39,10 @@ const TimeTracking = ({ user }) => {
   const fetchTasks = async () => {
     try {
       const response = await api.get('/tasks/');
-      setTasks(response.data);
+      setTasks(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       console.error('Error fetching tasks:', getErrorMessage(error));
+      setTasks([]);
     }
   };
 
