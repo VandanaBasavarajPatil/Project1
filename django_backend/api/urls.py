@@ -45,6 +45,9 @@ urlpatterns = [
     # Notification endpoints
     path('notifications/', views.NotificationListView.as_view(), name='notification-list'),
     path('notifications/<uuid:pk>/read/', views.mark_notification_read, name='notification-read'),
+    path('notifications/mark-all-read/', views.mark_all_notifications_read, name='notification-mark-all-read'),
+    path('notifications/summary/', views.notification_summary, name='notification-summary'),
+    path('notifications/check-reminders/', views.check_reminders, name='check-reminders'),
     
     # Analytics endpoints
     path('analytics/productivity-trends/', views.analytics_productivity_trends, name='analytics-productivity'),
