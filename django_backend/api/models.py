@@ -138,6 +138,52 @@ class Comment(models.Model):
         return f"Comment by {self.user.name} on {self.task.title}"
 
 
+class Attachment(models.Model):
+    """File attachments for tasks"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='attachments')
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='uploaded_attachments')
+    file_name = models.CharField(max_length=255)
+    file_size = models.PositiveIntegerField()  # in bytes
+    file_type = models.CharField(max_length=100)
+    file_url = models.URLField()  # For future cloud storage integration
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-uploaded_at']
+    
+    def __str__(self):
+        return f"{self.file_name} - {self.task.title}"
+
+
+class ActivityLog(models.Model):
+    """Activity log for tracking changes"""
+    ACTION_TYPES = [
+        ('created', 'Created'),
+        ('updated', 'Updated'),
+        ('deleted', 'Deleted'),
+        ('assigned', 'Assigned'),
+        ('status_changed', 'Status Changed'),
+        ('commented', 'Commented'),
+        ('attached_file', 'Attached File'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='activity_logs')
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='activity_logs', null=True, blank=True)
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='activity_logs', null=True, blank=True)
+    action = models.CharField(max_length=20, choices=ACTION_TYPES)
+    description = models.TextField()
+    metadata = models.JSONField(default=dict, blank=True)  # Store additional data
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.user.name} {self.action} - {self.description}"
+
+
 class Notification(models.Model):
     """Notifications for users"""
     NOTIFICATION_TYPES = [
