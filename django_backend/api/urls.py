@@ -56,4 +56,12 @@ urlpatterns = [
     path('analytics/productivity-trends/', views.analytics_productivity_trends, name='analytics-productivity'),
     path('analytics/team-performance/', views.analytics_team_performance, name='analytics-team'),
     path('analytics/task-distribution/', views.analytics_task_distribution, name='analytics-distribution'),
+    
+    # Attachment endpoints
+    path('tasks/<uuid:task_id>/attachments/', views.AttachmentListCreateView.as_view(), name='attachment-list-create'),
+    path('attachments/<uuid:pk>/', views.AttachmentDetailView.as_view(), name='attachment-detail'),
+    
+    # Activity log endpoints
+    path('activity-logs/', views.ActivityLogListView.as_view(), name='activity-log-list'),
+    path('activity-logs/recent/', views.recent_activity, name='recent-activity'),
 ]
