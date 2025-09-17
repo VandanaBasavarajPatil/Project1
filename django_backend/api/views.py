@@ -740,3 +740,146 @@ def analytics_task_distribution(request):
         'priority_distribution': priority_distribution,
         'project_distribution': project_distribution
     })
+
+
+# Attachment Views
+class AttachmentListCreateView(generics.ListCreateAPIView):
+    """List attachments or create a new attachment"""
+    serializer_class = AttachmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """Filter attachments based on task access"""
+        user = self.request.user
+        task_id = self.kwargs.get('task_id')
+        
+        if task_id:
+            try:
+                task = Task.objects.get(id=task_id)
+                # Check if user can access this task
+                if user.role == 'scrum_master':
+                    return Attachment.objects.filter(task=task)
+                elif (task.assigned_to == user or task.created_by == user or 
+                      (task.project and task.project.team_members.filter(id=user.id).exists())):
+                    return Attachment.objects.filter(task=task)
+                else:
+                    return Attachment.objects.none()
+            except Task.DoesNotExist:
+                return Attachment.objects.none()
+        
+        return Attachment.objects.none()
+    
+    def perform_create(self, serializer):
+        task_id = self.kwargs.get('task_id')
+        task = Task.objects.get(id=task_id)
+        
+        # Check if user can access this task
+        user = self.request.user
+        if user.role != 'scrum_master':
+            if not (task.assigned_to == user or task.created_by == user or 
+                   (task.project and task.project.team_members.filter(id=user.id).exists())):
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("You don't have permission to add attachments to this task")
+        
+        attachment = serializer.save(uploaded_by=user, task=task)
+        
+        # Create activity log
+        ActivityLog.objects.create(
+            user=user,
+            task=task,
+            project=task.project,
+            action='attached_file',
+            description=f'Attached file: {attachment.file_name}',
+            metadata={'file_name': attachment.file_name, 'file_size': attachment.file_size}
+        )
+
+
+class AttachmentDetailView(generics.RetrieveDestroyAPIView):
+    """Retrieve or delete an attachment"""
+    serializer_class = AttachmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'scrum_master':
+            return Attachment.objects.all()
+        else:
+            # Users can only access attachments from tasks they have access to
+            return Attachment.objects.filter(
+                Q(task__assigned_to=user) |
+                Q(task__created_by=user) |
+                Q(task__project__team_members=user) |
+                Q(uploaded_by=user)
+            ).distinct()
+    
+    def perform_destroy(self, instance):
+        # Only uploader or Scrum Master can delete
+        user = self.request.user
+        if instance.uploaded_by != user and user.role != 'scrum_master':
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("You can only delete your own attachments")
+        
+        # Create activity log
+        ActivityLog.objects.create(
+            user=user,
+            task=instance.task,
+            project=instance.task.project,
+            action='deleted',
+            description=f'Deleted attachment: {instance.file_name}'
+        )
+        
+        instance.delete()
+
+
+# Activity Log Views
+class ActivityLogListView(generics.ListAPIView):
+    """List activity logs"""
+    serializer_class = ActivityLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """Filter activity logs based on user role and access"""
+        user = self.request.user
+        task_id = self.request.query_params.get('task_id')
+        project_id = self.request.query_params.get('project_id')
+        
+        queryset = ActivityLog.objects.select_related('user', 'task', 'project')
+        
+        if task_id:
+            queryset = queryset.filter(task_id=task_id)
+        if project_id:
+            queryset = queryset.filter(project_id=project_id)
+        
+        # Role-based filtering
+        if user.role == 'scrum_master':
+            return queryset
+        else:
+            # Employees can only see activity logs for tasks/projects they have access to
+            return queryset.filter(
+                Q(task__assigned_to=user) |
+                Q(task__created_by=user) |
+                Q(task__project__team_members=user) |
+                Q(project__team_members=user) |
+                Q(user=user)
+            ).distinct()
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def recent_activity(request):
+    """Get recent activity for the user's accessible tasks and projects"""
+    user = request.user
+    limit = int(request.GET.get('limit', 10))
+    
+    if user.role == 'scrum_master':
+        activities = ActivityLog.objects.select_related('user', 'task', 'project')[:limit]
+    else:
+        activities = ActivityLog.objects.filter(
+            Q(task__assigned_to=user) |
+            Q(task__created_by=user) |
+            Q(task__project__team_members=user) |
+            Q(project__team_members=user) |
+            Q(user=user)
+        ).select_related('user', 'task', 'project').distinct()[:limit]
+    
+    return Response(ActivityLogSerializer(activities, many=True).data)
