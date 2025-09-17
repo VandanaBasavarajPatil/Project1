@@ -14,6 +14,10 @@ from .serializers import (
     ProjectSerializer, TaskSerializer, TimeEntrySerializer,
     CommentSerializer, NotificationSerializer, DashboardStatsSerializer
 )
+from .permissions import (
+    IsScrumMasterOrReadOnly, IsScrumMaster, IsOwnerOrScrumMaster,
+    IsAssignedOrScrumMaster, CanAccessProject, CanAccessTask
+)
 
 
 # Authentication Views
