@@ -8,11 +8,12 @@ from django.db.models import Q, Count, Avg
 from datetime import datetime, timedelta
 import pandas as pd
 
-from .models import User, Project, Task, TimeEntry, Comment, Notification
+from .models import User, Project, Task, TimeEntry, Comment, Notification, Attachment, ActivityLog
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserLoginSerializer,
     ProjectSerializer, TaskSerializer, TimeEntrySerializer,
-    CommentSerializer, NotificationSerializer, DashboardStatsSerializer
+    CommentSerializer, NotificationSerializer, DashboardStatsSerializer,
+    AttachmentSerializer, ActivityLogSerializer
 )
 from .permissions import (
     IsScrumMasterOrReadOnly, IsScrumMaster, IsOwnerOrScrumMaster,
