@@ -152,11 +152,15 @@ class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
 # Task Views
 class TaskListCreateView(generics.ListCreateAPIView):
     """List all tasks or create a new task"""
-    queryset = Task.objects.select_related('assigned_to', 'created_by', 'project')
     serializer_class = TaskSerializer
+    permission_classes = [IsScrumMasterOrReadOnly]
     
     def get_queryset(self):
-        queryset = super().get_queryset()
+        """Filter tasks based on user role and permissions"""
+        user = self.request.user
+        queryset = Task.objects.select_related('assigned_to', 'created_by', 'project')
+        
+        # Filter by project_id and status if provided
         project_id = self.request.query_params.get('project_id')
         status_filter = self.request.query_params.get('status')
         
@@ -165,7 +169,16 @@ class TaskListCreateView(generics.ListCreateAPIView):
         if status_filter:
             queryset = queryset.filter(status=status_filter)
         
-        return queryset
+        # Apply role-based filtering
+        if user.role == 'scrum_master':
+            return queryset
+        else:
+            # Employees can only see tasks assigned to them or in projects they're part of
+            return queryset.filter(
+                Q(assigned_to=user) |
+                Q(created_by=user) |
+                Q(project__team_members=user)
+            ).distinct()
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -173,8 +186,22 @@ class TaskListCreateView(generics.ListCreateAPIView):
 
 class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update or delete a task"""
-    queryset = Task.objects.select_related('assigned_to', 'created_by', 'project')
     serializer_class = TaskSerializer
+    permission_classes = [CanAccessTask, IsAssignedOrScrumMaster]
+    
+    def get_queryset(self):
+        """Filter tasks based on user role"""
+        user = self.request.user
+        queryset = Task.objects.select_related('assigned_to', 'created_by', 'project')
+        
+        if user.role == 'scrum_master':
+            return queryset
+        else:
+            return queryset.filter(
+                Q(assigned_to=user) |
+                Q(created_by=user) |
+                Q(project__team_members=user)
+            ).distinct()
 
 
 # Time Entry Views
