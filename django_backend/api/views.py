@@ -207,11 +207,14 @@ class TaskDetailView(generics.RetrieveUpdateDestroyAPIView):
 # Time Entry Views
 class TimeEntryListCreateView(generics.ListCreateAPIView):
     """List all time entries or create a new time entry"""
-    queryset = TimeEntry.objects.select_related('user', 'task')
     serializer_class = TimeEntrySerializer
+    permission_classes = [permissions.IsAuthenticated]
     
     def get_queryset(self):
-        queryset = super().get_queryset()
+        """Filter time entries based on user role"""
+        user = self.request.user
+        queryset = TimeEntry.objects.select_related('user', 'task')
+        
         task_id = self.request.query_params.get('task_id')
         user_id = self.request.query_params.get('user_id')
         
@@ -220,7 +223,12 @@ class TimeEntryListCreateView(generics.ListCreateAPIView):
         if user_id:
             queryset = queryset.filter(user_id=user_id)
         
-        return queryset
+        # Role-based filtering
+        if user.role == 'scrum_master':
+            return queryset
+        else:
+            # Employees can only see their own time entries
+            return queryset.filter(user=user)
     
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -228,8 +236,177 @@ class TimeEntryListCreateView(generics.ListCreateAPIView):
 
 class TimeEntryDetailView(generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update or delete a time entry"""
-    queryset = TimeEntry.objects.select_related('user', 'task')
     serializer_class = TimeEntrySerializer
+    permission_classes = [IsOwnerOrScrumMaster]
+    
+    def get_queryset(self):
+        """Filter time entries based on user role"""
+        user = self.request.user
+        queryset = TimeEntry.objects.select_related('user', 'task')
+        
+        if user.role == 'scrum_master':
+            return queryset
+        else:
+            return queryset.filter(user=user)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def start_timer(request):
+    """Start a timer for a task"""
+    task_id = request.data.get('task_id')
+    description = request.data.get('description', '')
+    
+    if not task_id:
+        return Response({'error': 'task_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        task = Task.objects.get(id=task_id)
+        
+        # Check if user can access this task
+        user = request.user
+        if user.role != 'scrum_master':
+            if not (task.assigned_to == user or task.created_by == user or 
+                   (task.project and task.project.team_members.filter(id=user.id).exists())):
+                return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        
+        # Check if user already has an active timer
+        active_timer = TimeEntry.objects.filter(
+            user=user,
+            end_time__isnull=True
+        ).first()
+        
+        if active_timer:
+            return Response({
+                'error': 'You already have an active timer',
+                'active_timer': TimeEntrySerializer(active_timer).data
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Create new time entry
+        time_entry = TimeEntry.objects.create(
+            task=task,
+            user=user,
+            start_time=timezone.now(),
+            description=description
+        )
+        
+        return Response(TimeEntrySerializer(time_entry).data, status=status.HTTP_201_CREATED)
+        
+    except Task.DoesNotExist:
+        return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def stop_timer(request):
+    """Stop the active timer"""
+    time_entry_id = request.data.get('time_entry_id')
+    user = request.user
+    
+    if time_entry_id:
+        try:
+            time_entry = TimeEntry.objects.get(id=time_entry_id, user=user, end_time__isnull=True)
+        except TimeEntry.DoesNotExist:
+            return Response({'error': 'Active timer not found'}, status=status.HTTP_404_NOT_FOUND)
+    else:
+        # Find user's active timer
+        time_entry = TimeEntry.objects.filter(
+            user=user,
+            end_time__isnull=True
+        ).first()
+        
+        if not time_entry:
+            return Response({'error': 'No active timer found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Stop the timer
+    time_entry.end_time = timezone.now()
+    time_entry.save()  # This will trigger the duration calculation in the model
+    
+    # Update task actual hours
+    task = time_entry.task
+    task.actual_hours += time_entry.duration_hours or 0
+    task.save()
+    
+    return Response(TimeEntrySerializer(time_entry).data)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def active_timer(request):
+    """Get user's active timer"""
+    user = request.user
+    active_timer = TimeEntry.objects.filter(
+        user=user,
+        end_time__isnull=True
+    ).first()
+    
+    if active_timer:
+        return Response(TimeEntrySerializer(active_timer).data)
+    else:
+        return Response({'active_timer': None})
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def time_summary(request):
+    """Get time tracking summary for the user"""
+    user = request.user
+    
+    # Get date range from query params
+    days = int(request.GET.get('days', 7))  # Default to last 7 days
+    end_date = timezone.now().date()
+    start_date = end_date - timedelta(days=days)
+    
+    # Get time entries for the period
+    time_entries = TimeEntry.objects.filter(
+        user=user,
+        start_time__date__gte=start_date,
+        start_time__date__lte=end_date,
+        end_time__isnull=False
+    ).select_related('task', 'task__project')
+    
+    # Calculate summary statistics
+    total_hours = sum(entry.duration_hours or 0 for entry in time_entries)
+    total_entries = len(time_entries)
+    
+    # Group by date
+    daily_summary = {}
+    for entry in time_entries:
+        date_str = entry.start_time.date().isoformat()
+        if date_str not in daily_summary:
+            daily_summary[date_str] = {
+                'date': date_str,
+                'total_hours': 0,
+                'entries': []
+            }
+        daily_summary[date_str]['total_hours'] += entry.duration_hours or 0
+        daily_summary[date_str]['entries'].append(TimeEntrySerializer(entry).data)
+    
+    # Group by project
+    project_summary = {}
+    for entry in time_entries:
+        project_name = entry.task.project.title if entry.task.project else 'No Project'
+        if project_name not in project_summary:
+            project_summary[project_name] = {
+                'project': project_name,
+                'total_hours': 0,
+                'task_count': set()
+            }
+        project_summary[project_name]['total_hours'] += entry.duration_hours or 0
+        project_summary[project_name]['task_count'].add(entry.task.id)
+    
+    # Convert sets to counts
+    for proj in project_summary.values():
+        proj['task_count'] = len(proj['task_count'])
+    
+    return Response({
+        'period': f'Last {days} days',
+        'total_hours': round(total_hours, 2),
+        'total_entries': total_entries,
+        'average_hours_per_day': round(total_hours / days, 2) if days > 0 else 0,
+        'daily_summary': list(daily_summary.values()),
+        'project_summary': list(project_summary.values())
+    })
 
 
 # User Views
