@@ -183,6 +183,36 @@ class NotificationSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 
+class AttachmentSerializer(serializers.ModelSerializer):
+    """Serializer for Attachment model"""
+    uploaded_by = UserSerializer(read_only=True)
+    task_id = serializers.PrimaryKeyRelatedField(queryset=Task.objects.all(), write_only=True)
+    
+    class Meta:
+        model = Attachment
+        fields = ['id', 'task_id', 'uploaded_by', 'file_name', 'file_size', 
+                 'file_type', 'file_url', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_by', 'uploaded_at']
+    
+    def create(self, validated_data):
+        task_id = validated_data.pop('task_id')
+        attachment = Attachment.objects.create(task=task_id, **validated_data)
+        return attachment
+
+
+class ActivityLogSerializer(serializers.ModelSerializer):
+    """Serializer for ActivityLog model"""
+    user = UserSerializer(read_only=True)
+    task = TaskSerializer(read_only=True)
+    project = ProjectSerializer(read_only=True)
+    
+    class Meta:
+        model = ActivityLog
+        fields = ['id', 'user', 'task', 'project', 'action', 'description', 
+                 'metadata', 'created_at']
+        read_only_fields = ['id', 'user', 'created_at']
+
+
 class DashboardStatsSerializer(serializers.Serializer):
     """Serializer for dashboard statistics"""
     tasks_completed = serializers.IntegerField()
