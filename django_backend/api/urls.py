@@ -29,6 +29,10 @@ urlpatterns = [
     # Time entry endpoints
     path('time-entries/', views.TimeEntryListCreateView.as_view(), name='timeentry-list-create'),
     path('time-entries/<uuid:pk>/', views.TimeEntryDetailView.as_view(), name='timeentry-detail'),
+    path('time-entries/start-timer/', views.start_timer, name='start-timer'),
+    path('time-entries/stop-timer/', views.stop_timer, name='stop-timer'),
+    path('time-entries/active-timer/', views.active_timer, name='active-timer'),
+    path('time-entries/summary/', views.time_summary, name='time-summary'),
     
     # User endpoints
     path('users/', views.UserListView.as_view(), name='user-list'),
