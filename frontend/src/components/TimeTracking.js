@@ -48,9 +48,10 @@ const TimeTracking = ({ user }) => {
   const fetchTimeEntries = async () => {
     try {
       const response = await api.get('/time-entries/');
-      setTimeEntries(response.data);
+      setTimeEntries(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       console.error('Error fetching time entries:', getErrorMessage(error));
+      setTimeEntries([]);
     } finally {
       setLoading(false);
     }
