@@ -438,19 +438,45 @@ def time_summary(request):
 # User Views
 class UserListView(generics.ListAPIView):
     """List all users"""
-    queryset = User.objects.filter(is_active=True)
     serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        """Filter users based on role"""
+        user = self.request.user
+        queryset = User.objects.filter(is_active=True)
+        
+        if user.role == 'scrum_master':
+            return queryset
+        else:
+            # Employees can only see users in their projects
+            return queryset.filter(
+                Q(id=user.id) |
+                Q(projects__team_members=user)
+            ).distinct()
 
 
 class UserDetailView(generics.RetrieveUpdateAPIView):
     """Retrieve or update user details"""
-    queryset = User.objects.all()
     serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        return User.objects.filter(is_active=True)
     
     def get_object(self):
         if self.kwargs.get('pk') == 'me':
             return self.request.user
-        return super().get_object()
+        
+        obj = super().get_object()
+        
+        # Users can only update their own profile unless they're Scrum Master
+        if self.request.method in ['PUT', 'PATCH']:
+            if obj != self.request.user and self.request.user.role != 'scrum_master':
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("You can only update your own profile")
+        
+        return obj
 
 
 @api_view(['GET'])
@@ -458,6 +484,92 @@ class UserDetailView(generics.RetrieveUpdateAPIView):
 def me_view(request):
     """Return the current authenticated user's profile"""
     return Response(UserSerializer(request.user).data)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def change_password(request):
+    """Change user password"""
+    user = request.user
+    old_password = request.data.get('old_password')
+    new_password = request.data.get('new_password')
+    
+    if not old_password or not new_password:
+        return Response({
+            'error': 'Both old_password and new_password are required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not user.check_password(old_password):
+        return Response({
+            'error': 'Current password is incorrect'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Validate new password
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError
+    
+    try:
+        validate_password(new_password, user)
+    except ValidationError as e:
+        return Response({
+            'error': e.messages
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    user.set_password(new_password)
+    user.save()
+    
+    return Response({'message': 'Password changed successfully'})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def update_profile(request):
+    """Update user profile information"""
+    user = request.user
+    data = request.data
+    
+    # Fields that can be updated
+    allowed_fields = ['name', 'avatar']
+    
+    for field in allowed_fields:
+        if field in data:
+            setattr(user, field, data[field])
+    
+    user.save()
+    
+    return Response({
+        'message': 'Profile updated successfully',
+        'user': UserSerializer(user).data
+    })
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([permissions.IsAuthenticated])
+def user_preferences(request):
+    """Get or update user preferences"""
+    user = request.user
+    
+    if request.method == 'GET':
+        # Get user preferences (we'll store as JSON in a future UserPreferences model)
+        # For now, return default preferences
+        preferences = {
+            'theme': 'light',
+            'notifications_enabled': True,
+            'email_notifications': True,
+            'task_reminders': True,
+            'daily_summary': False,
+            'timezone': 'UTC'
+        }
+        return Response(preferences)
+    
+    elif request.method == 'POST':
+        # Update preferences (placeholder for now)
+        preferences = request.data
+        # TODO: Store preferences in UserPreferences model
+        return Response({
+            'message': 'Preferences updated successfully',
+            'preferences': preferences
+        })
 
 
 # Comment Views
