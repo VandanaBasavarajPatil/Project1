@@ -119,8 +119,17 @@ def dashboard_stats(request):
 # Project Views
 class ProjectListCreateView(generics.ListCreateAPIView):
     """List all projects or create a new project"""
-    queryset = Project.objects.all()
     serializer_class = ProjectSerializer
+    permission_classes = [IsScrumMasterOrReadOnly]
+    
+    def get_queryset(self):
+        """Filter projects based on user role"""
+        user = self.request.user
+        if user.role == 'scrum_master':
+            return Project.objects.all()
+        else:
+            # Employees can only see projects they're team members of
+            return Project.objects.filter(team_members=user)
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -128,8 +137,16 @@ class ProjectListCreateView(generics.ListCreateAPIView):
 
 class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
     """Retrieve, update or delete a project"""
-    queryset = Project.objects.all()
     serializer_class = ProjectSerializer
+    permission_classes = [CanAccessProject, IsScrumMasterOrReadOnly]
+    
+    def get_queryset(self):
+        """Filter projects based on user role"""
+        user = self.request.user
+        if user.role == 'scrum_master':
+            return Project.objects.all()
+        else:
+            return Project.objects.filter(team_members=user)
 
 
 # Task Views
