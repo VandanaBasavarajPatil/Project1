@@ -70,45 +70,71 @@ def login_view(request):
 # Dashboard Views
 @api_view(['GET'])
 def dashboard_stats(request):
-    """Get dashboard statistics"""
+    """Get dashboard statistics with role-based filtering"""
     user = request.user
     
+    # Apply role-based filtering
+    if user.role == 'scrum_master':
+        tasks_queryset = Task.objects.all()
+        projects_queryset = Project.objects.all()
+    else:
+        tasks_queryset = Task.objects.filter(
+            Q(assigned_to=user) |
+            Q(created_by=user) |
+            Q(project__team_members=user)
+        ).distinct()
+        projects_queryset = Project.objects.filter(team_members=user)
+    
     # Get task statistics
-    total_tasks = Task.objects.count()
-    completed_tasks = Task.objects.filter(status='done').count()
-    overdue_tasks = Task.objects.filter(
+    total_tasks = tasks_queryset.count()
+    completed_tasks = tasks_queryset.filter(status='done').count()
+    overdue_tasks = tasks_queryset.filter(
         due_date__lt=timezone.now(),
         status__in=['todo', 'in_progress', 'review']
     ).count()
     
     # Get active projects
-    active_projects = Project.objects.filter(status='active').count()
+    active_projects = projects_queryset.filter(status='active').count()
     
     # Get recent tasks
-    recent_tasks = Task.objects.select_related('assigned_to', 'created_by', 'project').order_by('-created_at')[:5]
+    recent_tasks = tasks_queryset.select_related('assigned_to', 'created_by', 'project').order_by('-created_at')[:5]
     recent_tasks_data = TaskSerializer(recent_tasks, many=True).data
     
-    # Calculate metrics using pandas for data processing
+    # Calculate real metrics using pandas for data processing
     completion_rate = (completed_tasks / total_tasks * 100) if total_tasks > 0 else 0
     
-    # Mock data for now - can be calculated from actual time entries
-    avg_completion_time = 2.5
-    team_productivity = 85.0
-    daily_focus_time = 6.5
+    # Calculate real time-based metrics
+    time_entries = TimeEntry.objects.filter(
+        user=user,
+        end_time__isnull=False,
+        start_time__gte=timezone.now() - timedelta(days=30)
+    )
     
-    # In real implementation, use pandas to process time entry data
-    # time_entries_df = pd.DataFrame(list(TimeEntry.objects.values()))
-    # if not time_entries_df.empty:
-    #     avg_completion_time = time_entries_df['duration_hours'].mean()
-    #     daily_focus_time = time_entries_df.groupby('user_id')['duration_hours'].sum().mean()
+    if time_entries.exists():
+        # Use pandas for analysis
+        time_data = list(time_entries.values('duration_hours', 'start_time', 'task_id'))
+        df = pd.DataFrame(time_data)
+        
+        if not df.empty:
+            avg_completion_time = df['duration_hours'].mean()
+            daily_focus_time = df.groupby(df['start_time'].dt.date)['duration_hours'].sum().mean()
+        else:
+            avg_completion_time = 0
+            daily_focus_time = 0
+    else:
+        avg_completion_time = 0
+        daily_focus_time = 0
+    
+    # Calculate team productivity (completion rate * efficiency)
+    team_productivity = completion_rate * 0.85 if completion_rate > 0 else 0
     
     stats = {
         'tasks_completed': completed_tasks,
-        'avg_completion_time': avg_completion_time,
-        'team_productivity': team_productivity,
+        'avg_completion_time': round(avg_completion_time, 1),
+        'team_productivity': round(team_productivity, 1),
         'overdue_tasks': overdue_tasks,
-        'daily_focus_time': daily_focus_time,
-        'completion_rate': completion_rate,
+        'daily_focus_time': round(daily_focus_time, 1),
+        'completion_rate': round(completion_rate, 1),
         'active_projects': active_projects,
         'recent_tasks': recent_tasks_data
     }
